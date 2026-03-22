@@ -1,319 +1,263 @@
 # RAG-DistressNet
 
-A Retrieval-Augmented Generation (RAG) system that supports searching through **PDFs** and **Images** using vector embeddings and LLM-powered answers.
+A lightweight RAG playground for document search and image search. The current CLI runtime lives in `app.py` + `src/` and supports:
+
+- Document retrieval with FAISS + `all-MiniLM-L6-v2`
+- Image retrieval with OpenCLIP `ViT-L-14`
+- Answer generation / image description with OpenAI `gpt-4o-mini`
 
 ## Architecture
 
-### PDF Pipeline
-```
-PDF → PyPDFLoader extracts text → Chunked → Embedded (all-MiniLM-L6-v2) → FAISS index
-Query → Embedded (all-MiniLM-L6-v2) → FAISS retrieves top-k chunks → OpenAI LLM generates answer
+### Document pipeline
+```text
+Documents in data/ -> LangChain loaders -> chunking -> all-MiniLM-L6-v2 embeddings
+-> FAISS IndexFlatL2 -> top-k retrieved chunks -> gpt-4o-mini answer
 ```
 
-### Image Pipeline
-```
-Image → CLIP (ViT-L-14) embeds directly → FAISS index
-Query → CLIP embeds text → FAISS retrieves best match → OpenAI LLM describes matched image
+### Image pipeline
+```text
+Images in data/ -> OpenCLIP image embeddings -> FAISS IndexFlatIP
+-> CLIP text query embedding -> top-k image matches -> gpt-4o-mini image description
 ```
 
 ## Prerequisites
 
-- **Python 3.11**
-- **Conda** (Miniforge recommended for Mac, Miniconda/Anaconda for Linux)
-- **OpenAI API key** with credits loaded
-- **chafa** (optional, for terminal image display)
+- Python 3.11 or newer with `python3` available on your PATH
+- An OpenAI API key with credits
+- Optional: `chafa` for terminal image previews
 
-## Setup
+If `chafa` is not installed, image search still works and the CLI will simply skip the preview.
 
-### Mac (Apple Silicon M1/M2/M3/M4)
+## Quick Start
 
-> **Important:** Use [Miniforge](https://github.com/conda-forge/miniforge) (ARM-native conda), not Anaconda (x86). Anaconda limits PyTorch to v2.2.2 on Apple Silicon.
+### 1. Install dependencies
 
-```bash
-# Install Miniforge if not already installed
-brew install miniforge
-/opt/homebrew/Caskroom/miniforge/base/bin/conda init zsh
-# Restart terminal after this
-
-# Optional: install chafa for terminal image display
-brew install chafa
-```
-
-### Linux (Ubuntu/Debian)
+Use the install script from the project root:
 
 ```bash
-# Install Miniconda if not already installed
-wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
-bash Miniconda3-latest-Linux-x86_64.sh
-# Follow prompts, restart terminal
-
-# Optional: install chafa for terminal image display
-sudo apt install chafa
+chmod +x scripts/install.sh
+./scripts/install.sh
 ```
 
-### Linux (Fedora/RHEL)
+Useful options:
 
 ```bash
-# Install Miniconda if not already installed
-wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
-bash Miniconda3-latest-Linux-x86_64.sh
-# Follow prompts, restart terminal
+# Linux CPU-only
+./scripts/install.sh --torch cpu
 
-# Optional: install chafa for terminal image display
-sudo dnf install chafa
+# Linux with NVIDIA CUDA 12.1 wheels
+./scripts/install.sh --torch cuda
+
+# Skip torch if you already installed it yourself
+./scripts/install.sh --torch skip
+
+# Use a different requirements file
+./scripts/install.sh --requirements requirements.txt
 ```
 
----
+The script:
 
-### Common Setup (Mac & Linux)
+- creates `.venv/` if needed
+- upgrades `pip`, `setuptools`, and `wheel`
+- installs `torch` / `torchvision`
+- installs `numpy<2`
+- installs everything from `requirements.txt`
 
-#### 1. Create Conda Environment
+### Install script guide
+
+You can inspect the script's built-in help at any time:
 
 ```bash
-conda create -n rag python=3.11 -y
-conda activate rag
+./scripts/install.sh --help
 ```
 
-#### 2. Install PyTorch (first, separately)
+Available options:
 
-**Mac (Apple Silicon):**
-```bash
-pip install torch torchvision
-```
+- `--requirements PATH`: use a different requirements file
+- `--venv PATH`: create or reuse a virtual environment at a custom path
+- `--torch MODE`: choose how PyTorch is installed
 
-Verify MPS support:
-```bash
-python -c "import torch; print(torch.__version__, torch.backends.mps.is_available())"
-# Should show: 2.x.x True
-```
+Supported `--torch` modes:
 
-**Linux (CPU only):**
-```bash
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-```
+- `auto`: uses a sensible default for your OS
+- `default`: installs standard PyPI wheels
+- `cpu`: installs CPU-only wheels
+- `cuda`: installs CUDA 12.1 wheels
+- `skip`: skips PyTorch installation entirely
 
-**Linux (with NVIDIA GPU):**
-```bash
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
-```
-
-Verify CUDA support:
-```bash
-python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
-# Should show: 2.x.x True (if GPU available)
-```
-
-#### 3. Install Dependencies
+Examples:
 
 ```bash
-pip install "numpy<2"
-pip install -r requirements.txt
-pip install docx2txt
-pip install langchain-text-splitters
+# Use the default .venv and auto-detected torch mode
+./scripts/install.sh
+
+# Create a custom virtual environment
+./scripts/install.sh --venv rag-env
+
+# Reuse an existing environment but skip torch
+./scripts/install.sh --venv .venv --torch skip
+
+# Install from another requirements file
+./scripts/install.sh --requirements requirements-dev.txt
 ```
 
-#### 4. Set Up API Key
+It is safe to rerun the script. If the virtual environment already exists, the script reuses it and reinstalls/upgrades packages as needed.
+
+### 2. Activate the environment
+
+```bash
+source .venv/bin/activate
+```
+
+### 3. Add your API key
 
 Create a `.env` file in the project root:
 
-```
+```env
 OPENAI_API_KEY=sk-proj-your_actual_key_here
 ```
 
-No quotes needed around the key.
+### 4. Add files to `data/`
 
-#### 5. Add Your Data
+Supported document formats:
 
-Place your files in the `data/` folder:
+- `.pdf`
+- `.txt`
+- `.csv`
+- `.xlsx`
+- `.docx`
+- `.json`
 
-```
+Supported image formats:
+
+- `.png`
+- `.jpg`
+- `.jpeg`
+
+Example:
+
+```text
 data/
 ├── paper1.pdf
-├── paper2.pdf
+├── notes.txt
+├── results.csv
 ├── cat.png
-├── dog.jpeg
-├── diagram.jpg
 └── subfolder/
-    └── more_files_here.pdf
+    └── offerletter.pdf
 ```
 
-**Supported formats:**
-- **PDFs:** `.pdf`
-- **Text:** `.txt`
-- **CSV:** `.csv`
-- **Excel:** `.xlsx`
-- **Word:** `.docx`
-- **Images:** `.png`, `.jpg`, `.jpeg`
+## How To Run
 
-## Usage
+### Document search
 
-### Search PDFs
+Document search is the default mode:
 
 ```bash
-python app.py --pdfs --query "What is attention mechanism?"
+python3 app.py --query "What is attention mechanism?"
 ```
 
-Or simply (defaults to PDFs):
+You can also pass `--pdfs` explicitly:
+
 ```bash
-python app.py --query "What is attention mechanism?"
+python3 app.py --pdfs --query "Summarize the offer letter"
 ```
 
-First run auto-builds the FAISS index (`faiss_store/`). Subsequent runs load it instantly.
+On the first run, the app builds `faiss_store/`. Later runs reuse the saved index.
 
-### Search Images
+### Image search
 
 ```bash
-python app.py --images --query "Show me the cat"
-python app.py --images --query "a person in suit"
-python app.py --images --query "famous tower"
+python3 app.py --images --query "Show me the cat"
+python3 app.py --images --query "a person in a suit"
+python3 app.py --images --query "famous tower"
 ```
 
-First run downloads the CLIP model (~900MB, one time) and builds the image index (`faiss_store_images/`). Subsequent runs load from saved index.
+On the first run, the app downloads the CLIP model and builds `faiss_store_images/`.
 
-### Rebuild Indexes
+### Rebuild the index
 
-After adding new files to `data/`, rebuild the relevant index:
+If you add or remove files and want a clean rebuild:
 
 ```bash
+# Rebuild document index
+python3 app.py --rebuild --query "What changed in the documents?"
+
 # Rebuild image index
-python app.py --images --rebuild --query "your query"
-
-# Rebuild PDF index (delete and re-run)
-rm -rf faiss_store
-python app.py --pdfs --query "your query"
+python3 app.py --images --rebuild --query "show me the cat"
 ```
 
 ## Project Structure
 
-```
+```text
 RAG-DistressNet/
-├── app.py                  # CLI entry point (--pdfs / --images / --rebuild)
-├── requirements.txt        # Python dependencies
-├── .env                    # OpenAI API key (create this)
-├── data/                   # Place PDFs and images here
-├── faiss_store/            # Auto-generated PDF vector index
-├── faiss_store_images/     # Auto-generated image vector index
+├── app.py
+├── requirements.txt
+├── scripts/
+│   └── install.sh
+├── data/
+├── faiss_store/            # created after first document run
+├── faiss_store_images/     # created after first image run
 └── src/
-    ├── __init__.py
-    ├── data_loader.py      # Loads PDFs, TXT, CSV, Excel, Word + image paths
-    ├── embedding.py        # Text chunking and embedding (all-MiniLM-L6-v2)
-    ├── vectorstore.py      # FAISS vector store for text documents
-    ├── clip_store.py       # CLIP-based vector store for images (ViT-L-14)
-    └── search.py           # RAGSearch (PDFs) + ImageRAGSearch (images)
+    ├── data_loader.py
+    ├── embedding.py
+    ├── vectorstore.py
+    ├── clip_store.py
+    └── search.py
 ```
 
-## How It Works
+## Current Runtime Notes
 
-### PDF Search
-1. **Indexing:** PDFs are loaded → split into chunks (1000 chars, 200 overlap) → embedded using `all-MiniLM-L6-v2` → stored in FAISS
-2. **Querying:** Query is embedded → FAISS finds top-k similar chunks → chunks sent as context to OpenAI GPT → LLM generates answer
-
-### Image Search
-1. **Indexing:** Images are embedded directly using CLIP (`ViT-L-14`) → stored in FAISS. No LLM needed at index time.
-2. **Querying:** Query text is embedded by CLIP → FAISS finds best matching image(s) → matched image sent to GPT-4o-mini for description
-3. **Matching:** Supports both visual matching (CLIP similarity) and filename matching (e.g., query "prof stoleru" matches `prof_stoleru.jpeg`)
-
-### Why CLIP for Images?
-CLIP understands both images and text in the same vector space. It was trained on 400M image-text pairs, so it knows that an image of a cat and the text "a photo of a cat" are similar — without needing an LLM to describe the image first. This keeps indexing fast, free, and local.
+- The main runtime uses `app.py` and `src/`.
+- Experimental notebooks are included in the repo, but they are not used by the CLI.
+- Document search currently retrieves chunk text and sends it directly to `gpt-4o-mini` in a simple prompt.
+- Image search retrieves with CLIP, then asks `gpt-4o-mini` to describe the retrieved image.
 
 ## Models Used
 
 | Component | Model | Purpose |
 |-----------|-------|---------|
-| Text Embeddings | `all-MiniLM-L6-v2` (~90MB) | Embeds PDF text chunks |
-| Image Embeddings | `ViT-L-14` via OpenCLIP (~900MB) | Embeds images and query text |
-| LLM | `gpt-4o-mini` (OpenAI API) | Generates answers from retrieved context |
-
-## Dependencies
-
-```
-langchain
-langchain-core
-langchain-community
-langchain-text-splitters
-langchain_openai
-pypdf
-pymupdf
-sentence-transformers
-faiss-cpu
-chromadb
-python-dotenv
-typesense
-langgraph
-Pillow
-open-clip-torch
-docx2txt
-```
+| Text embeddings | `all-MiniLM-L6-v2` | Embeds document chunks |
+| Image embeddings | `ViT-L-14` via OpenCLIP | Embeds images and image queries |
+| LLM | `gpt-4o-mini` | Generates document answers and image descriptions |
 
 ## Troubleshooting
 
-### PyTorch version stuck at 2.2.2 (Mac)
-You're using Intel Anaconda on Apple Silicon. Install Miniforge:
+### `python3: command not found`
+
+Install Python 3.11+ and make sure `python3` is on your PATH.
+
+### `OPENAI_API_KEY` errors
+
+Make sure `.env` exists in the project root and contains:
+
+```env
+OPENAI_API_KEY=your_key_here
+```
+
+### Image search shows no terminal preview
+
+Install `chafa` if you want previews:
+
 ```bash
-brew install miniforge
-/opt/homebrew/Caskroom/miniforge/base/bin/conda init zsh
-# Restart terminal
+# Ubuntu / Debian
+sudo apt install chafa
+
+# Fedora / RHEL
+sudo dnf install chafa
+
+# macOS
+brew install chafa
 ```
 
-### PyTorch not detecting GPU (Linux)
-Make sure you installed the CUDA version:
+### You added new files but results did not change
+
+Rebuild the relevant index:
+
 ```bash
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+python3 app.py --rebuild --query "your query"
+python3 app.py --images --rebuild --query "your query"
 ```
-Check NVIDIA drivers:
-```bash
-nvidia-smi
-```
-
-### `ModuleNotFoundError: No module named 'langchain.text_splitter'`
-```bash
-pip install langchain-text-splitters
-```
-And update import: `from langchain_text_splitters import RecursiveCharacterTextSplitter`
-
-### `ModuleNotFoundError: No module named 'langchain.schema'`
-Use updated imports:
-```python
-from langchain_core.documents import Document
-from langchain_core.messages import HumanMessage
-```
-
-### NumPy 2.x compatibility error
-```bash
-pip install "numpy<2"
-```
-
-### Segmentation fault with FAISS (Mac)
-```bash
-pip uninstall faiss-cpu -y
-conda install -c conda-forge faiss-cpu -y
-```
-
-### Segmentation fault with FAISS (Linux)
-```bash
-pip uninstall faiss-cpu -y
-pip install faiss-cpu --force-reinstall --no-cache-dir
-```
-
-### `open` command not found for images (Linux)
-The `open` command is Mac-only. On Linux, use `xdg-open` instead. In `app.py`, change:
-```python
-subprocess.run(["open", img["path"]])
-```
-to:
-```python
-subprocess.run(["xdg-open", img["path"]])
-```
-Or use `chafa` for terminal display (works on both Mac and Linux):
-```python
-subprocess.run(["chafa", "--size=40x20", img["path"]])
-```
-
-### CLIP not matching "human" or "person" correctly
-The ViT-L-14 model works best with descriptive queries. Try:
-- `"a person in suit"` instead of `"human"`
-- `"man portrait photo"` instead of `"person"`
 
 ## License
 
-GNU General Public License v3.0 — see [LICENSE](LICENSE) for details.
+GNU General Public License v3.0 - see [LICENSE](LICENSE) for details.
