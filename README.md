@@ -28,6 +28,63 @@ Images in data/ -> OpenCLIP image embeddings -> FAISS IndexFlatIP
 
 If `chafa` is not installed, image search still works and the CLI will simply skip the preview.
 
+## Docker Quick Start
+
+For moving this project to another machine with minimal setup, Docker is the fastest path. On Windows, install Docker Desktop and run these commands from PowerShell, Git Bash, or WSL in the repo root.
+
+### 1. Create your environment file
+
+```bash
+cp .env.example .env
+```
+
+Then open `.env` and add your real OpenAI API key:
+
+```env
+OPENAI_API_KEY=sk-proj-your_actual_key_here
+```
+
+### 2. Put your files in `data/`
+
+The Docker setup bind-mounts your local `data/` folder into the container, so whatever you place there will be available at runtime.
+
+### 3. Build the image
+
+```bash
+docker compose build
+```
+
+### 4. Run a document query
+
+```bash
+docker compose run --rm rag --query "What is attention mechanism?"
+```
+
+### 5. Run an image query
+
+```bash
+docker compose run --rm rag --images --query "Show me the cat"
+```
+
+### 6. Rebuild the index when your data changes
+
+```bash
+docker compose run --rm rag --rebuild --query "Summarize the documents"
+docker compose run --rm rag --images --rebuild --query "famous tower"
+```
+
+### Docker notes
+
+- The container uses CPU-only PyTorch for portability.
+- Document and image indexes are stored in Docker volumes, so they persist across runs.
+- Hugging Face model downloads are cached in a Docker volume to speed up later runs.
+- Terminal image preview is skipped in Docker because `chafa` is not installed in the image.
+- To completely reset the Docker-side caches and indexes, run:
+
+```bash
+docker compose down -v
+```
+
 ## Quick Start
 
 ### 1. Install dependencies
@@ -190,6 +247,8 @@ python3 app.py --images --rebuild --query "show me the cat"
 
 ```text
 RAG-DistressNet/
+├── Dockerfile
+├── docker-compose.yml
 ├── app.py
 ├── requirements.txt
 ├── scripts/
@@ -211,6 +270,7 @@ RAG-DistressNet/
 - Experimental notebooks are included in the repo, but they are not used by the CLI.
 - Document search currently retrieves chunk text and sends it directly to `gpt-4o-mini` in a simple prompt.
 - Image search retrieves with CLIP, then asks `gpt-4o-mini` to describe the retrieved image.
+- The Docker image is intended for quick CPU-based testing on other machines.
 
 ## Models Used
 

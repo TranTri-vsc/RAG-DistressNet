@@ -23,6 +23,7 @@ htmlcov/
 # Local environment and secrets
 .env
 .env.*
+!.env.example
 
 # Generated vector stores
 faiss_store/

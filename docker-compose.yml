@@ -1,0 +1,18 @@
+services:
+  rag:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: rag-distressnet:latest
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - rag_faiss_store:/app/faiss_store
+      - rag_faiss_store_images:/app/faiss_store_images
+      - rag_hf_cache:/cache/huggingface
+
+volumes:
+  rag_faiss_store:
+  rag_faiss_store_images:
+  rag_hf_cache:

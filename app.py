@@ -7,11 +7,19 @@ from src.search import RAGSearch
 
 ## surya - CLI flag support
 def reset_index(index_dir):
-    if os.path.isdir(index_dir):
-        shutil.rmtree(index_dir)
-        print(f"[INFO] Removed existing index at {index_dir}")
+    os.makedirs(index_dir, exist_ok=True)
+    removed_any = False
+    for entry in os.listdir(index_dir):
+        path = os.path.join(index_dir, entry)
+        if os.path.isdir(path) and not os.path.islink(path):
+            shutil.rmtree(path)
+        else:
+            os.unlink(path)
+        removed_any = True
+    if removed_any:
+        print(f"[INFO] Cleared existing index contents in {index_dir}")
     else:
-        print(f"[INFO] No existing index found at {index_dir}; building a fresh one.")
+        print(f"[INFO] {index_dir} was already empty; building a fresh index.")
 
 
 def render_image_preview(image_path):
