@@ -4,14 +4,16 @@ A lightweight RAG playground for document search and image search. The current C
 
 - Document retrieval with FAISS + `all-MiniLM-L6-v2`
 - Image retrieval with OpenCLIP `ViT-L-14`
-- Answer generation / image description with OpenAI `gpt-4o-mini`
+- Document answer generation with either OpenAI `gpt-4o-mini` or a local `llama.cpp` server
+- Image description with OpenAI `gpt-4o-mini`
 
 ## Architecture
 
 ### Document pipeline
 ```text
 Documents in data/ -> LangChain loaders -> chunking -> all-MiniLM-L6-v2 embeddings
--> FAISS IndexFlatL2 -> top-k retrieved chunks -> gpt-4o-mini answer
+-> FAISS IndexFlatL2 -> top-k retrieved chunks -> selected LLM backend
+   (OpenAI or local llama.cpp)
 ```
 
 ### Image pipeline
@@ -23,10 +25,76 @@ Images in data/ -> OpenCLIP image embeddings -> FAISS IndexFlatIP
 ## Prerequisites
 
 - Python 3.11 or newer with `python3` available on your PATH
-- An OpenAI API key with credits
+- An OpenAI API key with credits if you want the OpenAI-backed document or image paths
+- `git` and `cmake` if you want to build the local `llama.cpp` path
 - Optional: `chafa` for terminal image previews
 
 If `chafa` is not installed, image search still works and the CLI will simply skip the preview.
+
+## Local llama.cpp Quick Start
+
+This branch now includes a first local-LLM milestone for document answering. The retrieval stack is unchanged, but the document generation step can point to a local `llama.cpp` server instead of OpenAI.
+
+`Qwen/Qwen3.5-4B` is the target model for this first pass. Because it is a multimodal checkpoint, this repo currently uses it only for text-only document answers. Image description still follows the existing OpenAI path.
+
+### 1. Install Python dependencies
+
+```bash
+chmod +x scripts/install.sh
+./scripts/install.sh --torch cpu
+```
+
+### 2. Build `llama.cpp`
+
+```bash
+chmod +x scripts/setup_llama_cpp.sh
+./scripts/setup_llama_cpp.sh --backend cpu
+```
+
+Use `--backend cuda` on a CUDA-capable NVIDIA machine or `--backend metal` on Apple Silicon.
+
+### 3. Download and convert `Qwen3.5-4B`
+
+```bash
+chmod +x scripts/prepare_qwen3_5_4b.sh
+./scripts/prepare_qwen3_5_4b.sh --quant Q4_K_M
+```
+
+This script:
+
+- downloads `Qwen/Qwen3.5-4B` from Hugging Face
+- converts the official checkpoint to GGUF with upstream `llama.cpp`
+- quantizes it for local inference
+
+### 4. Start the local server
+
+```bash
+./third_party/llama.cpp/build/bin/llama-server \
+  --model ./models/Qwen3.5-4B-Q4_K_M.gguf \
+  --host 127.0.0.1 \
+  --port 8080 \
+  --ctx-size 8192
+```
+
+### 5. Smoke test the local server
+
+```bash
+python3 scripts/smoke_test_llama_server.py \
+  --model Qwen3.5-4B \
+  --base-url http://127.0.0.1:8080/v1
+```
+
+### 6. Run document RAG against the local backend
+
+```bash
+python3 app.py \
+  --query "Summarize the offer letter" \
+  --llm-backend llama_cpp \
+  --llm-model Qwen3.5-4B \
+  --llm-base-url http://127.0.0.1:8080/v1
+```
+
+If you prefer environment variables over CLI flags, copy the values from `.env.example` into `.env` and set `LLM_BACKEND=llama_cpp`.
 
 ## Docker Quick Start
 
@@ -174,6 +242,15 @@ Create a `.env` file in the project root:
 OPENAI_API_KEY=sk-proj-your_actual_key_here
 ```
 
+If you are only testing the local document backend, you can skip `OPENAI_API_KEY` and instead set:
+
+```env
+LLM_BACKEND=llama_cpp
+LLM_MODEL=Qwen3.5-4B
+LLM_BASE_URL=http://127.0.0.1:8080/v1
+LLM_API_KEY=EMPTY
+```
+
 ### 4. Add files to `data/`
 
 Supported document formats:
@@ -219,6 +296,16 @@ You can also pass `--pdfs` explicitly:
 python3 app.py --pdfs --query "Summarize the offer letter"
 ```
 
+To use the local `llama.cpp` backend for document answers:
+
+```bash
+python3 app.py \
+  --query "Summarize the offer letter" \
+  --llm-backend llama_cpp \
+  --llm-model Qwen3.5-4B \
+  --llm-base-url http://127.0.0.1:8080/v1
+```
+
 On the first run, the app builds `faiss_store/`. Later runs reuse the saved index.
 
 ### Image search
@@ -248,17 +335,25 @@ python3 app.py --images --rebuild --query "show me the cat"
 ```text
 RAG-DistressNet/
 ├── Dockerfile
+├── docs/
+│   └── local_rag_plan.md
 ├── docker-compose.yml
 ├── app.py
 ├── requirements.txt
 ├── scripts/
-│   └── install.sh
+│   ├── install.sh
+│   ├── prepare_qwen3_5_4b.sh
+│   ├── setup_llama_cpp.sh
+│   └── smoke_test_llama_server.py
 ├── data/
 ├── faiss_store/            # created after first document run
 ├── faiss_store_images/     # created after first image run
+├── models/                 # created by local model setup
+├── third_party/            # created by local llama.cpp setup
 └── src/
     ├── data_loader.py
     ├── embedding.py
+    ├── llm.py
     ├── vectorstore.py
     ├── clip_store.py
     └── search.py
@@ -268,8 +363,9 @@ RAG-DistressNet/
 
 - The main runtime uses `app.py` and `src/`.
 - Experimental notebooks are included in the repo, but they are not used by the CLI.
-- Document search currently retrieves chunk text and sends it directly to `gpt-4o-mini` in a simple prompt.
+- Document search now supports either the OpenAI backend or a local `llama.cpp` server.
 - Image search retrieves with CLIP, then asks `gpt-4o-mini` to describe the retrieved image.
+- The new local milestone is documented in `docs/local_rag_plan.md`.
 - The Docker image is intended for quick CPU-based testing on other machines.
 
 ## Models Used
@@ -278,7 +374,8 @@ RAG-DistressNet/
 |-----------|-------|---------|
 | Text embeddings | `all-MiniLM-L6-v2` | Embeds document chunks |
 | Image embeddings | `ViT-L-14` via OpenCLIP | Embeds images and image queries |
-| LLM | `gpt-4o-mini` | Generates document answers and image descriptions |
+| Document LLM | `gpt-4o-mini` or local `Qwen3.5-4B` via `llama.cpp` | Generates document answers |
+| Image LLM | `gpt-4o-mini` | Describes retrieved images |
 
 ## Troubleshooting
 
@@ -292,6 +389,28 @@ Make sure `.env` exists in the project root and contains:
 
 ```env
 OPENAI_API_KEY=your_key_here
+```
+
+`OPENAI_API_KEY` is only required for the OpenAI-backed document path and for image mode.
+
+### Local `llama.cpp` server is unreachable
+
+Make sure `llama-server` is running and that the app is pointing at the right URL:
+
+```bash
+python3 app.py \
+  --query "test" \
+  --llm-backend llama_cpp \
+  --llm-model Qwen3.5-4B \
+  --llm-base-url http://127.0.0.1:8080/v1
+```
+
+You can validate the server independently with:
+
+```bash
+python3 scripts/smoke_test_llama_server.py \
+  --model Qwen3.5-4B \
+  --base-url http://127.0.0.1:8080/v1
 ```
 
 ### Image search shows no terminal preview

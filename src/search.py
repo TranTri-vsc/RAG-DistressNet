@@ -1,26 +1,38 @@
-import os
-from dotenv import load_dotenv
-from src.vectorstore import FaissVectorStore
-from langchain_openai import ChatOpenAI
-from langchain_core.messages import HumanMessage
 import base64
+import os
 from pathlib import Path
+
+from dotenv import load_dotenv
+from langchain_core.messages import HumanMessage
+from langchain_openai import ChatOpenAI
+
+from src.llm import LLMConfig, build_chat_model, describe_backend, extract_text_from_response
+from src.vectorstore import FaissVectorStore
 
 load_dotenv()
 
+
 class RAGSearch:
-    def __init__(self, persist_dir: str = "faiss_store", embedding_model: str = "all-MiniLM-L6-v2", llm_model: str = "gpt-4o-mini"):
+    def __init__(
+        self,
+        persist_dir: str = "faiss_store",
+        embedding_model: str = "all-MiniLM-L6-v2",
+        llm_config: LLMConfig | None = None,
+    ):
         self.vectorstore = FaissVectorStore(persist_dir, embedding_model)
         faiss_path = os.path.join(persist_dir, "faiss.index")
         meta_path = os.path.join(persist_dir, "metadata.pkl")
         if not (os.path.exists(faiss_path) and os.path.exists(meta_path)):
             from src.data_loader import load_all_documents
+
             docs = load_all_documents("data")
             self.vectorstore.build_from_documents(docs)
         else:
             self.vectorstore.load()
-        self.llm = ChatOpenAI(model=llm_model)
-        print(f"[INFO] OpenAI LLM initialized: {llm_model}")
+
+        self.llm_config = llm_config or LLMConfig.from_inputs()
+        self.llm = build_chat_model(self.llm_config)
+        print(f"[INFO] Document LLM initialized: {describe_backend(self.llm_config)}")
 
     def search_and_summarize(self, query: str, top_k: int = 5) -> str:
         results = self.vectorstore.query(query, top_k=top_k)
@@ -28,9 +40,17 @@ class RAGSearch:
         context = "\n\n".join(texts)
         if not context:
             return "No relevant documents found."
-        prompt = f"""Answer the following question using only the context provided. Be direct and concise.\n\nQuestion: {query}\n\nContext:\n{context}\n\nAnswer:"""
-        response = self.llm.invoke([prompt])
-        return response.content
+
+        prompt = (
+            "Answer the question using only the context below. "
+            "If the answer is not present, say that the context does not contain it. "
+            "Be direct and concise.\n\n"
+            f"Question: {query}\n\n"
+            f"Context:\n{context}\n\n"
+            "Answer:"
+        )
+        response = self.llm.invoke([HumanMessage(content=prompt)])
+        return extract_text_from_response(response)
 
 
 ## surya - CLIP-based Image Search with LLM description

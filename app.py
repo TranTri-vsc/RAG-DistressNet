@@ -2,6 +2,7 @@ import argparse
 import os
 import shutil
 import subprocess
+from src.llm import LLMConfig, SUPPORTED_LLM_BACKENDS
 from src.search import RAGSearch
 
 
@@ -29,10 +30,21 @@ def render_image_preview(image_path):
     subprocess.run(["chafa", "--size=40x20", image_path], check=False)
 
 
-def run_pdfs(query, rebuild=False):
+def build_llm_config(args):
+    return LLMConfig.from_inputs(
+        backend=args.llm_backend,
+        model=args.llm_model,
+        base_url=args.llm_base_url,
+        api_key=args.llm_api_key,
+        temperature=args.llm_temperature,
+        disable_thinking=not args.enable_thinking,
+    )
+
+
+def run_pdfs(query, rebuild=False, llm_config=None):
     if rebuild:
         reset_index("faiss_store")
-    rag_search = RAGSearch()
+    rag_search = RAGSearch(llm_config=llm_config)
     summary = rag_search.search_and_summarize(query, top_k=3)
     print("Summary:", summary)
 
@@ -58,10 +70,59 @@ if __name__ == "__main__":
     parser.add_argument("--images", action="store_true", help="Search through images")
     parser.add_argument("--rebuild", action="store_true", help="Rebuild the selected index before searching")
     parser.add_argument("--query", type=str, default="What is attention mechanism?", help="Search query")
+    parser.add_argument(
+        "--llm-backend",
+        choices=SUPPORTED_LLM_BACKENDS,
+        default=None,
+        help="LLM backend for document answers: openai or llama_cpp",
+    )
+    parser.add_argument(
+        "--llm-model",
+        type=str,
+        default=None,
+        help="Override the LLM model name for the selected backend",
+    )
+    parser.add_argument(
+        "--llm-base-url",
+        type=str,
+        default=None,
+        help="Base URL for an OpenAI-compatible local server, e.g. http://127.0.0.1:8080/v1",
+    )
+    parser.add_argument(
+        "--llm-api-key",
+        type=str,
+        default=None,
+        help="Optional API key override. llama.cpp can usually use the default EMPTY value.",
+    )
+    parser.add_argument(
+        "--llm-temperature",
+        type=float,
+        default=None,
+        help="Override the LLM temperature",
+    )
+    parser.add_argument(
+        "--enable-thinking",
+        action="store_true",
+        help="Allow reasoning / <think> output on models that support it",
+    )
     args = parser.parse_args()
 
     if args.images:
+        if any(
+            value is not None
+            for value in (
+                args.llm_backend,
+                args.llm_model,
+                args.llm_base_url,
+                args.llm_api_key,
+                args.llm_temperature,
+            )
+        ) or args.enable_thinking:
+            print(
+                "[WARN] Image mode still uses the existing OpenAI image description path. "
+                "The local llama.cpp backend currently applies to document mode only."
+            )
         run_images(args.query, rebuild=args.rebuild)
     else:
-        run_pdfs(args.query, rebuild=args.rebuild)
-## surya end
+        llm_config = build_llm_config(args)
+        run_pdfs(args.query, rebuild=args.rebuild, llm_config=llm_config)

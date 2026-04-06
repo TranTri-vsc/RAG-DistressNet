@@ -115,7 +115,9 @@ cat <<EOF
 [INFO] Installation complete.
 Next steps:
   1. Activate the environment: source "$VENV_DIR/bin/activate"
-  2. Create a .env file with OPENAI_API_KEY=...
+  2. Choose a backend:
+     - OpenAI: create .env with OPENAI_API_KEY=...
+     - Local llama.cpp: run ./scripts/setup_llama_cpp.sh and ./scripts/prepare_qwen3_5_4b.sh
   3. Add your files to data/
   4. Run a search, for example:
      python3 app.py --query "What is attention mechanism?"

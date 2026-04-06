@@ -28,6 +28,8 @@ htmlcov/
 # Generated vector stores
 faiss_store/
 faiss_store_images/
+models/
+third_party/
 
 # Notebook and editor noise
 .ipynb_checkpoints/
